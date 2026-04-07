@@ -1,6 +1,6 @@
-﻿streamlit
+streamlit
 transformers
 torch
+torchvision
 speechrecognition
 deep-translator
-streamlit-webrtc
