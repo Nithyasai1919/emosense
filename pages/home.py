@@ -1,11 +1,16 @@
 import streamlit as st
+import numpy as np
+import av
+import tempfile
+import soundfile as sf
 import speech_recognition as sr
-import os
+
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+from transformers import pipeline
 from components.translator import translate_to_english
 from components.history import add_to_history
-from transformers import pipeline
 
-# Language options
+# 🌍 Languages
 LANGUAGES = {
     "English": "en",
     "Tamil": "ta",
@@ -13,7 +18,7 @@ LANGUAGES = {
     "Hindi": "hi"
 }
 
-# Load emotion model
+# 🤖 Load Emotion Model
 @st.cache_resource
 def load_model():
     return pipeline(
@@ -22,95 +27,82 @@ def load_model():
         top_k=None
     )
 
+# 🎤 Audio Processor
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.audio_frames = []
+
+    def recv(self, frame: av.AudioFrame):
+        audio = frame.to_ndarray().flatten()
+        self.audio_frames.append(audio)
+        return frame
+
+# 🎯 MAIN FUNCTION
 def show():
     st.markdown("<h1 style='text-align:center; color:white;'>🎤 EmoSense</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#aaa;'>Speak. Sense. Understand.</p>", unsafe_allow_html=True)
 
+    # Language selection
     lang_label = st.selectbox("🌍 Select Language", list(LANGUAGES.keys()))
     lang_code = LANGUAGES[lang_label]
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("### 🎤 Speak your voice")
 
-    # 🎤 BUTTON
-    if st.button("🎤 Record & Analyze", use_container_width=True):
+    # 🎤 Start Mic
+    ctx = webrtc_streamer(
+        key="emotion-audio",
+        audio_processor_factory=AudioProcessor,
+        media_stream_constraints={"audio": True, "video": False},
+    )
 
-        is_cloud = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
+    # 🛑 Stop & Analyze
+    if ctx.audio_processor:
+        if st.button("🛑 Stop & Analyze", use_container_width=True):
 
-        # 🌐 STREAMLIT CLOUD (UPLOAD)
-        if is_cloud:
-            st.warning("🎤 Microphone not supported here. Please upload audio.")
+            audio_data = ctx.audio_processor.audio_frames
 
-            audio_file = st.file_uploader("Upload your voice (.wav)", type=["wav"])
+            if len(audio_data) == 0:
+                st.warning("⚠️ No audio recorded!")
+                return
 
-            if audio_file is not None:
-                r = sr.Recognizer()
-                with sr.AudioFile(audio_file) as source:
-                    audio = r.record(source)
+            # Convert audio
+            audio_np = np.concatenate(audio_data)
 
-                try:
-                    text = r.recognize_google(audio, language=lang_code)
-                    st.success(f"✅ You said: {text}")
+            # Save temp file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            sf.write(temp_file.name, audio_np, 16000)
 
-                    # Process emotion
-                    english_text = translate_to_english(text, lang_code)
-                    model = load_model()
-                    results = model(english_text)[0]
-                    results = sorted(results, key=lambda x: x['score'], reverse=True)
-                    top = results[0]
+            # Speech Recognition
+            r = sr.Recognizer()
+            with sr.AudioFile(temp_file.name) as source:
+                audio = r.record(source)
 
-                    add_to_history(text, top['label'], top['score'], lang_label)
+            try:
+                text = r.recognize_google(audio, language=lang_code)
+                st.success(f"✅ You said: {text}")
 
-                    st.session_state.result = {
-                        "original": text,
-                        "english": english_text,
-                        "emotions": results,
-                        "language": lang_label
-                    }
+                # Translate → Emotion
+                english_text = translate_to_english(text, lang_code)
+                model = load_model()
+                results = model(english_text)[0]
+                results = sorted(results, key=lambda x: x['score'], reverse=True)
+                top = results[0]
 
-                    st.session_state.page = "Result"
-                    st.rerun()
+                # Save history
+                add_to_history(text, top['label'], top['score'], lang_label)
 
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                # Store result
+                st.session_state.result = {
+                    "original": text,
+                    "english": english_text,
+                    "emotions": results,
+                    "language": lang_label
+                }
 
-        # 💻 LOCAL MIC (VS CODE)
-        else:
-            with st.spinner("🔴 Listening... Speak now!"):
-                r = sr.Recognizer()
-                r.energy_threshold = 300
-                r.dynamic_energy_threshold = True
+                st.session_state.page = "Result"
+                st.rerun()
 
-                try:
-                    with sr.Microphone() as source:
-                        st.markdown("🔴 Speak now...")
-                        r.adjust_for_ambient_noise(source, duration=0.3)
-                        audio = r.listen(source, timeout=10, phrase_time_limit=20)
-
-                    text = r.recognize_google(audio, language=lang_code)
-                    st.success(f"✅ You said: {text}")
-
-                    # Process emotion
-                    english_text = translate_to_english(text, lang_code)
-                    model = load_model()
-                    results = model(english_text)[0]
-                    results = sorted(results, key=lambda x: x['score'], reverse=True)
-                    top = results[0]
-
-                    add_to_history(text, top['label'], top['score'], lang_label)
-
-                    st.session_state.result = {
-                        "original": text,
-                        "english": english_text,
-                        "emotions": results,
-                        "language": lang_label
-                    }
-
-                    st.session_state.page = "Result"
-                    st.rerun()
-
-                except sr.WaitTimeoutError:
-                    st.error("⏱️ No speech detected. Try again!")
-                except sr.UnknownValueError:
-                    st.error("❌ Could not understand. Speak clearly!")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+            except sr.UnknownValueError:
+                st.error("❌ Could not understand. Speak clearly!")
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
