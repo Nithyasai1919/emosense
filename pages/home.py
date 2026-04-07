@@ -1,5 +1,6 @@
 import streamlit as st
 import speech_recognition as sr
+import os
 from components.translator import translate_to_english
 from components.history import add_to_history
 from transformers import pipeline
@@ -28,37 +29,39 @@ def show():
 
     col = st.columns([1,2,1])[1]
     with col:
-        if st.button("🎤 Record & Analyze", use_container_width=True):
-            with st.spinner("🔴 Listening... Speak now!"):
-                r = sr.Recognizer()
-                r.energy_threshold = 300
-                r.dynamic_energy_threshold = True
-                try:
-                    with sr.Microphone() as source:
-                        st.markdown("<p style='text-align:center; color:#ff4444;'>🔴 Speak now...</p>", unsafe_allow_html=True)
-                        r.adjust_for_ambient_noise(source, duration=0.3)
-                        audio = r.listen(source, timeout=10, phrase_time_limit=20)
-                    
-                    with st.spinner("Analyzing..."):
-                        text = r.recognize_google(audio, language=lang_code)
-                        st.success(f"✅ You said: {text}")
-                        english_text = translate_to_english(text, lang_code)
-                        model = load_model()
-                        results = model(english_text)[0]
-                        results = sorted(results, key=lambda x: x['score'], reverse=True)
-                        top = results[0]
-                        add_to_history(text, top['label'], top['score'], lang_label)
-                        st.session_state.result = {
-                            "original": text,
-                            "english": english_text,
-                            "emotions": results,
-                            "language": lang_label
-                        }
-                        st.session_state.page = "Result"
-                        st.rerun()
-                except sr.WaitTimeoutError:
-                    st.error("⏱️ No speech detected. Please try again!")
-                except sr.UnknownValueError:
-                    st.error("❌ Could not understand. Please speak clearly!")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+       if st.button("🎤 Record & Analyze", use_container_width=True):
+
+    # Detect if running on Streamlit Cloud
+    is_cloud = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
+
+    if is_cloud:
+        st.warning("🎤 Microphone not supported here. Please upload audio.")
+
+        audio_file = st.file_uploader("Upload your voice", type=["wav"])
+
+        if audio_file is not None:
+            r = sr.Recognizer()
+            with sr.AudioFile(audio_file) as source:
+                audio = r.record(source)
+
+            text = r.recognize_google(audio, language=lang_code)
+            st.success(f"✅ You said: {text}")
+
+    else:
+        # LOCAL MIC (your original code)
+        with st.spinner("🔴 Listening... Speak now!"):
+            r = sr.Recognizer()
+            r.energy_threshold = 300
+            r.dynamic_energy_threshold = True
+
+            try:
+                with sr.Microphone() as source:
+                    st.markdown("<p style='text-align:center; color:#ff4444;'>🔴 Speak now...</p>", unsafe_allow_html=True)
+                    r.adjust_for_ambient_noise(source, duration=0.3)
+                    audio = r.listen(source, timeout=10, phrase_time_limit=20)
+
+                text = r.recognize_google(audio, language=lang_code)
+                st.success(f"✅ You said: {text}")
+
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
