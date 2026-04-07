@@ -5,3 +5,6 @@ torchvision
 deep-translator
 streamlit-webrtc
 av
+soundfile
+numpy
+speechrecognition
