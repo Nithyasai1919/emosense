@@ -29,10 +29,10 @@ def show():
 
     col = st.columns([1,2,1])[1]
     with col:
-       if st.button("🎤 Record & Analyze", use_container_width=True):
+    if st.button("🎤 Record & Analyze", use_container_width=True):
 
     # Detect if running on Streamlit Cloud
-    is_cloud = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
+       is_cloud = os.getenv("STREAMLIT_SERVER_HEADLESS") == "true"
 
     if is_cloud:
         st.warning("🎤 Microphone not supported here. Please upload audio.")
